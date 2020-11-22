@@ -1,0 +1,57 @@
+Quarkus 1.7.3.Final GraalVM 20.1.0 Java 11
+
+--->Utiliser les profils pour configurer une application différement selon l'étape de son cycle de vie (dev, test, prod) 
+
+Application basée sur l'application hibernate de chapter05
+
+--préparation de la base de l'application :
+- copie du dossier hibernate sous chapter08 et renommage en profiles
+- depuis IJ, renommage de l'iml en profiles.iml | dans pom.ml : artifactId = profiles-demo, groupId = org.cesi.chapter08, maven.compiler.source/target=11,  quarkus.plateform/plugin.version=1.7.3.Final | dans le code renommage de la racine des packages en org.cesi.chapter08
+
+
+- Dans application.properties, 
+	on spécifie 3 bases différentes associées chacune à un profil de configuration différent :
+%dev.quarkus.datasource.url=jdbc:postgresql://localhost:5432/postgresDev
+%test.quarkus.datasource.url=jdbc:postgresql://localhost:6432/postgresTest
+%prod.quarkus.datasource.url=jdbc:postgresql://localhost:7432/postgresProd
+
+	on redéfinit les propriétés du pool de connexion pour la prod :
+%prod.quarkus.datasource.initial-size=10
+%prod.quarkus.datasource.min-size=10
+%prod.quarkus.datasource.max-size=20
+
+- A la racine du projet profiles, création de 3 scripts pour lancer la base PostGreSQL containerisés de dev, test et prod
+
+- Activation du profil dev
+	--lancement du script (depuis un term IJ par exemple) sh dbdev.sh => le container Docker contenant la base postgresDev est lancé
+	note : les flags/option docker sont décrites en commentaire dans ce fichier.
+	--lancement de l'app en mode dev : mvn quarkus:dev (depuis un term IJ, par exemple)
+	-- ouverture de l'URL http://localhost:8080=> la GUI avec les customers (insérés en base) s'affiche.
+	-- fermeture de l'app et arrêt/suppr du container via Ctr+C dans les term respectifs
+
+- Activation du profil test
+	--lancement du script (depuis un term IJ par exemple) sh dbtest.sh
+	--lancement des test : mvn test (depuis un term IJ, par ex) => le test doit passer avec succès.
+	--arrêt/suppr du container via Ctr+C
+<l'activation/l'utilisation des profils test et dev sont facilités par le plugin Quarkus et aussi, pour test uniquement, par le goal test Maven>
+
+- Activation du profil prod :
+	--lancement du script (depuis un term IJ par exemple) sh dbprod.sh
+	--packaging de l'application en spécifiant, via propriété système Java, le profil de conf utilisé (ici prod) : mvn clean package -Dquarkus.profile=prod -DskipTests=true
+	note : on peut spécifier un autre profil (test ou dev).
+	note :si le container de la base test est en exé on peut "activer" (ne pas esquiver) les tests
+	--lancement de l'application : java -jar target/profiles-demo-1.0.0-SNAPSHOT-runner.jar
+	-- ouverture de l'URL http://localhost:8080
+	-- fermeture de l'app
+	note :au lieu de spécifier le profil de configuration lors du packaging, on peut utiliser une var d'env avant de lancer l'appli :
+	-- packaging : mvn clean package  -DskipTests=true
+	-- déclaration de la var d'env pour la session terminale en cours : export QUARKUS_PROFILE=prod
+
+<on peut activer n'importe quel profil avec cette méthode, pas seulement le profil de configuration prod>
+
+
+
+
+	
+
+

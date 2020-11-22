@@ -1,0 +1,57 @@
+Quarkus 1.8.3.Final GraalVM 20.1.0 Java 11
+
+=> mise en place d'un client SQL réactif pour PostgreSQL utilisant l'API Vert.x Axle (déprécié - il faut utiliser plutôt Vert.x Mutiny)
+
+- sous chapter09, création d'un projet pgpool via IJ (starter https://code.quarkus.io/) : artifactId= customer-service | Sélection de l'extension Reactive PostgreSQL Client (Vert.x) |project name = pgpool
+(note : les extensions resteasy et resteasy-jsonb ont été ajouté "manuellement" dans le pom.xml)
+
+sous pgpool, création du script db.sh contenant la commande pour lancer la base PostgreSQL quarkusdb containerisée :
+docker run --ulimit memlock=-1:-1 -it --rm=true --memory-swappiness=0 --name quarkus_test -e POSTGRES_USER=quarkus -e POSTGRES_PASSWORD=quarkus -e POSTGRES_DB=quarkusdb -p 5432:5432 postgres:10.5
+
+- configuration dans application.properties, de la connexion à la base pour le client réactif pour Postgres :
+quarkus.datasource.url=vertx-reactive:postgresql://localhost:5432/quarkusdb | quarkus.datasource.username=quarkus | quarkus.datasource.password=quarkus
+
+- création du package org.cesi.chapter09
+
+- création de l'objet métier Customer (id, name, surname) avec un constructeur sans args et un constructeurs permettant d'assigner les props, et avec getters /setters et redéf de toString.
+
+Dans Customer,
+-création d'une méthode utilitaire statique privée permettant de retourner une instance Customer en récupérant les infos d'un enregistrement de type io.vertx.axle.sqlclient.Row
+- création de la méthode CompletionStage<List<Customer>> findAll(io.vertx.axle.pgclient.PgPool) utilisant l'API cliente réactive PostgreSQL pour exécuter de façon asynchrone la récupération de l'ensemble des customers depuis la base.
+
+<note : depuis Quarkus 1.5 (Vert.x 3.9), il faut utiliser execute() pour exécuter une Query : Pool.query("req SQL").execute()>
+
+- création du point de terminaison CustomerEndpoint "application scoped" associée à l'url de base /customers, consommant et produisant contenu JSON
+CustomerEndpoint,
+- injection du client réactif Postgres (un pool Postgres) : @Inject import io.vertx.axle.pgclient.PgPool client;
+- création d'un callback @PostConstruct pour créer les tables de la base et y insérer des données. la création non bloquante se fait dans un thread différent du thread principal dans lequel s'exécute le callback d'initialisation. Dans ce thread séparé, il y a exécution d'une succession de requêtes.
+- création d'une méthode GET asynchrone utilisant les API réactives pour récupérer et retourner la liste de tous les customers
+
+- test : exé de db.sh pour lancer la base containerisée | lancement de l'appli : mvn quarkus:dev | dans le nav: http://localhost:8080/customers
+
+On complète le code en ajoutant les méthodes pour créer, modifier, supprimer un customer :
+
+Dans Customer,
+	toutes les méthodes prennent un argument de type PgPool
+	toutes les méthodes utilisent un requête préparée et io.vertx.axle.sqlclient.Tuple.of pour passer les args à la requête préparée
+
+- ajout d'une méthode publique pour créer un client (customer) retournant un CompletionStage<Long> id du cust créé :
+return client.preparedQuery("INSERT INTO CUSTOMER (id, name,surname) VALUES ( nextval('customerId_seq'), $1,$2) RETURNING (id)")
+		.execute(Tuple.of(name,surname)).thenApply(pgRowSet->pgRowSet.iterator().next().getLong("id"));
+
+-ajout d'une méthode publique pour modifier un customer retournant un CompletionStage<Boolean> indiquant si l'updade a réussi
+
+- ajout d'une méthode statique publique pour modifier un customer retournant un CompletionStage<Boolean> indiquant si la suppression a réussi. Cette méthode prend aussi en argument
+l'id du customer (type Long)
+
+-Dans CustomerEndpoint, ajout des méthodes de ressources @POST, @PUT et @DELETE qui délègueront les opérations sur la bases aux méthodes de Customer décrites ci-dessus.
+
+- Depuis IJ créa sous resources d'un dossier META-INF puis d'un sous dossier resources (=> présenté sous IJ selon un formalisme package META-INF.resources)
+- Collage des fichers index.html et css fourni par le code source du livre. 
+  Dans le html, on ajoute en bas la </div> manquante dans le code original pour "fermer" <div class="divTable blueTable">
+
+- test fonctionnel : lancement container "postgres" et appli | ouverture de l'UI : localhost:8080 | opérations d'ajout, suppr et modifs
+- arrêt et mvn:clean
+
+
+

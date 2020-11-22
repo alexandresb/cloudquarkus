@@ -1,0 +1,102 @@
+Quarkus 1.7.0.Final GraalVM 20.1.0 Java 11
+configuration d'un service / d'une app via propriétés de configuration en utilisant l'API de configuration Eclipe MicroProfile (3.3)
+
+- Update IJ en version 2020.2
+- Création du projet Quarkus via IJ : sélection du JDK 11 comme project SDK par défaut | groupId=org.cesi.chapter08 | artifactId=advanced-config | sélection uniquement de la dépendance de base RESTEasy-JAXRS | project location : ...cloudquarkus/chapter08/advanced-config
+
+1) configuration de base 
+- dans application properties, création de la propriété d'application service.msg = bonjour
+- injection de la valeur de la propriété dans GreetingResource : @ConfigProperty(name="service.msg", defaultValue = "hello") string msg
+- dans la méthode GET hello, retour de msg
+
+--utilisation d'application.properties
+- lancement en mode dev depuis le term IJ : mvn [compile] quarkus:dev
+- test via navigateur : http://localhost:8080/hello=> bonjour est retourné
+- commentaire (suppression) de la propriété dans application.properties
+- rafraichissement du nav => hello est retourné
+Note: il y a hot replace du fait qu'application.properties est modifié.
+
+--utilisation d'une prop système Java
+- on stoppe le service
+- on construit le jar : mvn quarkus:build
+- on lance le jar depuis le term IJ en déclarant la propriété système Java : 
+java -jar -Dservice.msg=ciao target/advanced-config-1.0-SNAPSHOT-runner.jar
+- test via navigateur : http://localhost:8080/hello=> ciao est retourné
+NOTE : la propriété système passée via la commande java redéfinit  la propriété de configuration déclarée dans application.properties.
+
+--utilisation d'une var d'environnement
+- dans application.properties, on spécifie la propriété d'app intégrée quarkus.http.port=8081
+- on inscrit dans l'env la variable en exécutant dans le term IJ  : export quarkus_http_port=8082 
+(les _ remplacent les . de la propriété quarkus intégrée / fournie par Quarkus).
+- on lance l'app : mvn quarkus:dev
+=> le service écoute sur 8082.
+
+- on stoppe l'application | on supprime (commente) la propriété dans application.properties | on relance => le service écoute toujours sur 8082 (si on n'a pas fait de unset quarkus_http_export pour supprimer la var de l'env).
+- on stoppe l'application
+
+NOTEs : 
+  *la var d'env redéfinit la propriété d'application définie dans application.properties.
+  *la var d'env n'a pas besoin d'être déclarée dans application.properties
+
+On peut aussi créé une var d'env personnalisée qui sera injecté pour configurer l'app
+ - on commente service.msg=bonjour dans application.properties
+ - on export la var d'env service_msg=ola (export service_msg=ola) qui sera mappée avec la propriété msg de config nommée service.msg dans le code de GreetingResource
+ - on lance : mvn quarkus:dev
+ - test via navigateur : http://localhost:8080/hello=> ola est retourné
+
+2) création d'un source de config personnalisée / customisée
+- création du fichier externe /home/cesi/projects/cloudquarkus/chapter08/config.properties
+- ajout dans le fichier de la propriété de configuration de l'application service.msg = bonjour externe
+
+- création de la classe FileConfigSource implémentant org.eclipse.microprofile.config.spi.ConfigSource
+- implémentation des méthodes pour que le fichier config.properties soit prioritaire pour configurer l'app
+
+- enregistrement de la classe FileConfigSource comme fournisseur de props externe :
+	  	* création sous META-INF d'un dossier services et d'un fichier portant le nom pleinement qualifié de l'interface ConfigSource  : META-INF/services/org.eclipse.microprofile.config.spi.ConfigSource
+		Sous IJ on créé sous META-INF.resources services/org.eclipse.microprofile.config.spi.ConfigSource et on refactorise pour déplacer services à la racine de META-INF (il y a sûrement plus simple)
+
+        	* ajout dans le fichier du nom pleinenement qualifié de l'implémentation personnalisée de ConfigSource : 
+		org.cesi.chapter08.FileConfigSource
+
+- on lance : mvn quarkus:dev
+- test via navigateur : http://localhost:8080/hello=> 'bonjour externe' est retourné
+- arrêt de l'app
+ 
+
+-  on met en place le test validant que 'bonjour externe' est retourné :
+Pour cela on ouvre la classe ExampleResourceTest et on "remplace" .body(is("hello")) par .body(is("bonjour externe"));
+-lancement du test : mvn test
+
+3) utilisation des convertisseurs intégrés
+- dans application.properties ajouts de propriétés de configuration (year (int), isUser(boolean), students, pets (listes)
+- déplacement de @Path("/hello") sur la méthode hello() - annotation de la classe avec @Path("/")
+- placement de @Produces(MediaType.TEXT_PLAIN) sur la classe ExampleResource pour éviter de le spécifier sur plusieurs méthodes de ressource GET
+- injection des valeurs de ces propriétés dans des variables d'ExampleResource
+- implémentation des méthodes GET utilisant les propriétés de configuration injectées
+- test fonctionnels des méthodes GET utilisant les props injectées depuis le nav :http://localhost:8080/year, /isuser, /laststudent, /students, /pet/{id}
+
+- injection d'un objet de type org.eclipse.microprofile.config.Config rassemblant l'ensemble des props de configuration : @Inject Config config
+- création d'une méthode GET retournant 2 propriétés de sources différentes (config.properties & application.properties)
+- test fonctionnel de récup de propriétés : http://localhost:8080/config
+
+4) utilisation d'un convertisseur personnalisé (custom)
+- création d'une Classe CustomConfigProperty contenant les champs email et user qui seront alimentés par une propriété de configuration de application.properties
+- création d'un convertisseur implémentant l'interface org.eclipse.microprofile.config.spi.Converter<CustomConfigProperty>. 
+- on implémente la méthode convert retournant une instance de CustomConfigProperty après avoir parsé la valeur de la propriété de config.
+- déclaration du convertisseur : création du fichier META-INF/service/org.eclipse.microprofile.config.spi.Converter | ajout de l'entrée org.cesi.chapter08.CustomConfigPropConverter correspondant au nom pleinement qualifié du convertisseur personnalisé
+- Dans application.properties, déclaration de la propriété customConfig = alex@gmail.com;sbriglio
+- Dans ExampleResource, injection de la propriété customConfig dans la variable de type CustomConfigProperty :  
+	@ConfigProperty(name = "customConfig") CustomConfigProperty customConfigProperty;
+- création d'un méthode GET /email-user retournant le contenu parsé de la propriété customisée.
+
+- lancement de l'app & test fonctionnel : http://localhost:8080/email-user => alex@gmail.com--sbriglio retourné
+- arrêt de l'app
+
+
+
+ 
+
+
+
+
+

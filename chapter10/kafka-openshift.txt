@@ -1,0 +1,126 @@
+Quarkus 1.9.0.Final GraalVM 20.1.0 Java 11
+13 Go de RAM assigné à la VM
+
+=>Déploiement dans OpenShift 4 d'un système réactif intrégrant Kafka
+
+<Dans mon env VM, il faut économiser au max les ressources pour déployer Kafka (même en vers. 1 broker), et l'appli quarkus dans openshift => idéalement seul le terminal shell est ouvert>
+
+---préparation du projet Maven kafka-openshift---
+- duplication du projet kafka sous le nom kafka-openshift
+
+- depuis IJ on renomme le fichier iml : kafka-openshift.iml
+
+- dans application.properties, on renseigne l'adresse du cluster Kafka à laquelle chaque connecteur kafka (oubound et inbound) va se connecter :
+	-- outbound connector : mp.messaging.outgoing.stock-quote.bootstrap.servers=my-kafka-kafka-bootstrap:9092
+	-- inbound connector : mp.messaging.incoming.stocks.bootstrap.servers=my-kafka-kafka-bootstrap:9092
+
+- modification du fichier Dockerfile.native. On enlève la version de l'image ubi-minimal car avec un num de version le pull échoue dans l'env virtuel :
+FROM registry.access.redhat.com/ubi8/ubi-minimal (:8.1 enlevé)
+
+- fermeture d'IJ pour économiser des ressources
+
+- depuis un term, construction de l'image native depuis le dossier kafka-openshift :
+mvn clean package -Pnative -Dnative-image.docker-build=true
+<dans le livre la construction est intégré dans la phase de déploiement (commande dans le fichier sh)>
+
+---déploiement d'un cluster Kafka dans OpenShift---
+cf. kafka.docx
+
+- démarrage CodeReadyContainers avec 10 Go de RAM : crc start --memory 10240 
+
+- inscription d'oc dans le path pour le terminal en cours : eval $(crc oc-env)
+- authentification comme developer :  oc login -u developer -p developer https://api.crc.testing:6443
+- création du projet kafka-demo en tant que developer : oc new-project kafka-demo
+
+- ouverture de la console web : crc console | cliquer sur kube:admin pour se logguer en tant que kubeadmin | saisir kubadmin | mdp kubeadmin fourni dans la sortie de crc start (dpDFV-xamBW-kKAk3-Fi6Lg)
+- dans le menu haut gauche, s'assurer que le rôle Administrator est sélectionné en haut à gauche.
+- on choisit le menu Operators | OperatorHub
+- Sélectionner l'opérateur : Red Hat Integration - AMQ Streams (c'est l'opérateur Strimzi dans la version CRC 1.17)
+- clic sur Install
+- dans l'écran suivant : choisir update channel = stable | a specific namespace on the cluster = kafka-demo | Approval Strategy = automatic
+
+- copie du dossier /strimzi dans le code source original sous chapter10/kafka-openshift. ce dossier contient les 2 fichiers yaml pour configurer le Cluster et un topic kafka
+
+- on modifie le fichier kafka-cluster-descriptor.yaml pour que la version de Kafka soit la 2.5.0 : 
+version: 2.5.0
+
+<<< 
+---cette version 3 brokers n'a pas été utilisé car les perf de l'env virtuelles ne sont pas adaptées---
+-on renomme le fichier kafka-topic-queue-descriptor.yaml en kafka-topic-descriptor.yaml (on enlève queue)
+- on modifie le fichier de création du topic kafka-topic-descriptor.yaml  en spécifiant : replicas: 3 au lieu de 1 pour avoir une partition avec 3 réplicas 
+sinon ça sert un peu à rien d'avoir un cluster de 3 brokers Kafka qui contient que des réplicats pour les logs et pour le topic des offsets
+
+<Note:  j'ai quand même réussi a démarré ce cluster, mais ensuite les ressources étaient insuffisantes=> j'ai donc créé 1 version 1 broker>
+>>>
+
+- adaptation des fichiers yaml pour une VM Ubuntu avec 13 Go de RAM :
+<<<
+Dans mon env virtuel, il est difficile de déployer un cluster Kafka avec 3 brokers supervisés par 3 noeuds Zookeeper.
+J'ai donc créé sous strimzi des configruations pour un cluster avec 1 broker Kafka (et 1 noeud Zookeeper) hébergeant 1 topic stocks avec 1 seule partition ayant 1 seul réplica :
+--kafka-cluster-1broker-descriptor.yaml
+--kafka-topic-1replica-descriptor.yaml
+>>>
+
+ 
+- dans le terminal shell où oc est référencé et où on est connecté en tant que developer au projet kafka-demo :
+	-- on se place avec cd dans /home/cesi/projects/cloudquarkus/chapter10/kafka-openshift/strimzi
+	-- on configure le cluster Kafka nommé my-kafka : 
+		oc create -f kafka-cluster-1broker-descriptor.yaml (vers. 1 broker)
+
+<Il faut attendre que les pods soient créés. Pour vérifier : oc get pods>
+=> il faut que les pods Kafka et Zookeeper soient listés et en état READY
+
+	-- on crée le topic stocks : 
+		oc create -f kafka-topic-1replica-descriptor.yaml (vers. 1 replica)
+
+- on se connecte (à distance) dans le cluster Kafka pour lister le topic stocks : oc rsh my-kafka-kafka-0
+-une fois connecté au broker "distant", on lance : 
+./bin/kafka-topics.sh --list --zookeeper localhost:2181
+=> la sortie indique stocks (le topic)
+
+- on sort de la session distante :
+sh-4.2$ exit
+
+- on liste le nom des services pour vérifier qu'on a bien configurer l'adresse du serveur dans l'application : 
+oc get services -o=name
+=>le service qui nous intéresse est : [service/]my-kafka-kafka-bootstrap
+<dans un env "normal" où le cluster pourrait tourné en parallèle dans CRC, on vérifierait avant de configurer l'app>
+
+---déploiement de l'application réactive dans OpenShift---
+
+- on créé un fichier deploy-openshift.sh à la racine du projet (sous kafka-openshift) pour "automatiser" le déploiement.
+
+<NOTE : la construction de l'image native utilise par défaut beaucoup de mémoire. Cela plante souvent CRC. C'est pour cela que je crée l'image avant de démarrer le cluster>
+>
+
+<s'assurer qu'on est authentifié en tant que developer et associé au projet kafka-demo>
+- dans un terminal où oc est référencé dans le path , on se place dans le dossier kafka-openshift.
+- depuis le dossier projet (dossier kafka-openshift), on lance le script : 
+sh deploy-openshift.sh
+
+- verification avec oc get pods que le pod de l'application quarkus-kafka est prêt.
+
+- depuis la console web ouverte avec le compte developer (rôle administrator sélectionné), on navigue vers Networking | Routes 
+- ouverture de l'url http://quarkus-kafka-kafka-demo.apps-crc.testing/
+=> au bout de quelques secondes on voit les cotations varier.
+
+- on nettoie :
+	-- suppression de l'application quarkus-kafka : oc delete all -l app=quarkus-kafka
+	-- mvn clean
+
+	--destruction du topic, l'entity operator gérant ce topic et du cluster Kafka :
+		oc delete -f kafka-topic-1replica-descriptor.yaml
+		oc delete -f kafka-cluster-1broker-descriptor.yaml
+	--destruction de l'operator AMQ Streams (Strimzi) depuis la console web (loggué en kubeadmin)
+		Operators |Installed Operators | uninstall Operator
+	--suppression du projet kafka-demo en tant que developer :
+		oc delete project kafka-demo
+ 
+
+ 
+
+
+
+
+
+

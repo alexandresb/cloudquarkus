@@ -1,0 +1,48 @@
+Quarkus 1.9.2.Final GraalVM 20.1.0 Java 
+12 Go de RAM assigné à la VM
+
+=>mise en place avec MicroProfile Reactive Messaging d'une messagerie réactive utilisant le protocole AMQP (intégration d'Artemis ActiveMQ)
+On s'appuie ici sur le protocole AMQP 1.0
+
+
+Architecture de la messagerie réactive  - onc change le nom des canaux pour mieux matcher avec les étapes du pipeline de trading :
+[OpGenerator|>outbound connector]--out-operation-->[kafka-topic stocks-]--in-operation-->[inbound connector|>QuoteConverter]--in-memory-stock-quote-->[QuoteResource]--SSE-->index.html
+
+----application trading----
+- copie du prj Maven Kafka sous le nom amqp
+
+- modification du code depuis IJ :
+	--renommage iml: amqp.iml
+
+	--maj Maven :
+		--- artifactId=trading
+		--- upgrade vers Quarkus 1.9.2.Final (version du plugin mvn et de la plateforme)
+		--- remplacement de l'extension pour Kafka par celle pour utiliser AMPQP :
+			io.quarkus:quarkus-smallrye-reactive-messaging-amqp
+		---(vraiment optionnel) maj des commentaires dans les DockerFiles pour matcher avec l'id d'artefact trading
+	
+	--remplacement du fichier docker-compose.yml provenant du code source du livre
+	-- maj de la version de l'image (remplacement du tag) : vromero/activemq-artemis:2-alpine-latest (remplace vromero/activemq-artemis:2.9.0-alpine)
+
+	-- modification du code pour changer les noms de canaux. Mise à jour des commentaires avec les nvx noms de canaux et la référence à ActiveMQ /AMQP
+	
+	--configuration des connecteurs entrants et sortants pour AMQP dans application.properties en prenant en compte les nvx noms de canaux
+	-- index.html : changement du titre <title> : AMQP Demo - Artemis ActiveMQ
+
+----déploiement du pipeline----
+
+- dans un terminal (IJ) lancement du container embarquant le broker Artemis ActiveMQ (proto AMQP 1.0). on se place dans le dossier projet amqp (où se trouve le fichier YAML docker-compose.yml) et on exécute :
+docker-compose up
+<la console web d'Artemis est dispo à cette adresse : http://0.0.0.0:8161/console>
+
+- dans un autre terminal, lancement de l'application : mvn quarkus:dev
+(la queue stocks est créée durant le déploiement de l'application selon l'adresse indiquée dans application.properties)
+
+- ouverture de l'URL http://localhost:8080 pour voir les cotations varier dans le tableau
+
+- arrêt de l'application & mvn clean
+- arrêt du container :  
+docker stop $(docker ps -a -q) 
+ou Ctrl+C depuis le terminal dans lequel le container a été lancé.
+ 
+		

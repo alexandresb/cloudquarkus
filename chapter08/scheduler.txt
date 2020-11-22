@@ -1,0 +1,48 @@
+Quarkus 1.8.1.Final GraalVM 20.1.0 Java 11
+
+--->utilisation d'un service d'horloge / de planification des tâches
+
+projet créé via IJ (s'appuie sur code.quarkus.io) - selection de l'extension miscellanous| scheduler-tasks
+
+-renommage des classes créées par défaut en TokenResource, TokenResourceTest et NativeTokenResourceIT (IJ permet le renommage en 1 op grace à son assistant).
+
+- création du bean Application scoped TokenGenerator
+-création d'une méthode annotée @io.quarkus.scheduler.Scheduled(every="5s") pour que la méthode soit exécutée (périodiquement)  toutes les 5 sec. On utilise l'API java.util.UUID pour générer le token aléatoirement.
+=> on utilise un scheduler déclaratif
+
+- dans le EP TokenResource :
+	-- @Path("/token")
+	-- injection du bean TokenGenerator
+	-- "implémentation" (en retouchant la méthode originale hello()) de la méthode GET invocant TokenGenerator.getToken().
+
+
+- lancement mvn quarkus:dev et test fonctionnel localhost:8080/token avec rafraichissement de la page pour vérifier la génération d'un token toutes les 5 sec.
+- arrêt du mode dev
+
+- dans la classe de test TokenResourceTest remplacement du path get("/hello") par get("/token) ET suppr du test body(is("hello")) : on teste just que la requête GET "/token" renvoie un code 200
+- test : mvn test
+
+- dans TokenGenerator ajout d'une méthode temporelle utilisant les expressions cron :@Scheduled(cron = "0/30 * * * * ?") => déclenchement de l'éxecution toutes les 30 sec.
+
+- journalisation SLFJ dans différentes méthodes du EP TokenResource et du composant injecté TokenGenerator pour observer comment le runtime gère les threads pour traiter les requêtes http
+- mvn quarkus:dev
+=> lors de l'exe successive de quelques requêtes /token dans différents onglets du nav on voit que :
+	--chacune des2 méthodes "timer" ne s'exécutent pas obligatoirement dans un thread spécifique pour chacune d'elle => si un seul worker thread peut gérer l'ensemble des invocations, alors le runtime utilise qu'un worker
+	--le bean TokenGenerator est instancié 2 fois alors qu'il a un scope application. S'il a un scope Dependent, alors il y a 1 seule instanciation.
+
+- exe de requ "concurrentes" pour suivre la gestion des threads 
+	--install Jmeter | unzip | déplacement dossier racine sous /home/cesi/tools | config du path 
+	--dans term mise à jour du path et lancement jmeter : jmeter
+	--création d'un plan de test : ajout d'un thread group (nb of threads=100 | ram up=5 | loop count 5 | same user décoché(100 requ exécutées en 5 secondes ) // sous le thread group, ajout sampler http pour éxécuter GET /token // sous test plan test ajout d'un summary report // enregistrement du plan de test sous chapter08 (reqGetToken.jmx)
+	-- on déclenche toutes les 1 sec la géné de token @Scheduled(every="1s")
+	-- lancement mvn quarkus:dev
+	-- exécution plan de test et suivi des logs dans IJ - j'ai fait varier la config du thread group.
+	=> les logs démontrent bien :
+		---que plusieurs worker threads prennent en charge les requêtes entrantes simultanées 
+		(1 seul thread par requête (TR.getToken-> TG.getToken)) 	
+		--- les méthodes @Scheduled peuvent avoir un thread différent assigné à leur exécution
+		--- peu de workers threads sont nécessaires pour gérer un grand nb de requ simultanées et les méthodes @Scheduled
+	=> les logs laissent penser :
+		--- que les méthodes @Scheduled peuvent être diférées si beaucoup de requ concurrentes. c'est peu être juste l'écriture dans les logs de l'exe @Scheduled qui n'est  			pas prioritaire.
+
+<note : l'API Scheduler de Quarkus a supprimer la capacité pour un Scheduler injecté de démarrer programmatiquement un timer  - suppr de la méthode io.quarkus.scheduler.Scheduler.startTimer>

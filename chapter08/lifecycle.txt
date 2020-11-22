@@ -1,0 +1,33 @@
+Quarkus 1.7.3.Final GraalVM 20.1.0 Java 11
+
+--->evnmts du cycle de vie d'une application
+Application basée sur l'application profiles - copier/coller de profiles et renommages | suppression des scripts pour lancer PostgreSQL containerisé
+
+dans pom.xml on ajoute les dépendances pour H2(quarkus-jdbc-h2 & quarkus-test-h2) et on supprime la dépendance Postgres
+
+- dans application.properties,
+	--on ajoute l'URL pour la base H2 pour le mode dev et l'URL pour la base H2 utilisée pour les tests :
+	%dev.quarkus.datasource.url=jdbc:h2:tcp://localhost:19092/mem:test
+	%test.quarkus.datasource.url=jdbc:h2:tcp://localhost/mem:test
+	-- déclaration du driver H2 : quarkus.datasource.driver=org.h2.Driver
+	-- déclaration de l'utilisateur H2 : quarkus.datasource.username=default (pas de mot de passe)
+	-- suppression de la propriété "mdp" utilisée pour accéder à Postgres, suppression des proriétés pour configurer spécifiquement le pool pour la prod.
+
+-création d'un bean de scope Application permettant de démarrer la base H2
+	- utilise les events CDI @Initialized/@Destroyed(@ApplicationScoped.class)=> levés respectivement lorsque le contexte d'application a été  initialisé et a été détruit.
+	la base est démarrée dans la méthode interceptant @Initialized
+	- utilise les events Quarkus StartupEvent / ShutdownEvent respectivement levés en fin de démarrage (donc au cours du démarrage) de l'app et avant sa destruction.
+-création d'un bean RequestScoped avec un méthode "@Initialized(ApplicationScoped)" pour tester la levée de l'evnmt indiquant que le scope d'app est prêt.
+
+- lancement : mvn (clean) quarkus:dev et test fonctionnel via http://localhost:8080
+
+<Déduction des tests : un contexte d'application est toujours créé pour une app Quarkus même si pas de beans de scope Application.
+C'est normal car une app Quarkus est aussi une app CDI. Il y a donc une contexte d'application qui est créé lorsque le container est initialisé (cf. spec CDI p 167). 
+Pour tester, j'ai remplacé tous les @ApplicationScoped par @RequestScoped=>je suis revenu ensuite aux scopes initiaux.>
+
+- ajout de l'annotation @QuarkusTestResource(H2DatabaseTestResource.class) sur la classe de test pour utiliser H2 comme base de test
+-lancement des tests : mvn test 
+en début des logs de test on voit que la base de test a démarrée : TCP server running at tcp://127.0.1.1:9092 (only local connections)
+Note : comme l'event @Initialized est levé, alors une base H2 écoutant sur 19092 est démarrée même si on ne s'y connecte pas car on n'est pas en profil dev.
+
+

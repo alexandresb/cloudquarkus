@@ -1,0 +1,73 @@
+Quarkus 1.9.2.Final GraalVM 20.1.0 Java 
+12 Go de RAM assigné à la VM
+
+=>Déploiement dans OpenShift 4 d'un système réactif intrégrant un broker supportant AMQP (ici Artemis ActiveMQ)
+
+----préparation de l'application----
+
+- copie du projet amqp sous le nom amqp-openshift
+- renommage iml : amqp-openshift.iml
+- dans Dockerfile.native : on enlève le tag 8.1 de l'image ubi utilisée pour éviter des problèmes de chargement de l'image (cf. kafka-openshift)
+FROM registry.access.redhat.com/ubi8/ubi-minimal
+
+- dans application.properties, on ajoute les entrées pour pouvoir se connecter à un broker ActiveMQ déployé dans OpenShift. Utilisation de la configuration globale plutôt que de la configuration au niveau de chaque connecteur :
+amqp-host=artemis (c'est le nom du service sous OpenShift - il faudra bien vérifié lors de la création du service ActiveMQ dans CRC)            
+amqp-port=5672
+
+- création de l'exe natif trading-1.0-SNAPSHOT-runner pour Docker :
+mvn clean package -Pnative -Dnative-image.docker-build=true
+
+-  copie du fichier deploy-openshift.sh du projet kafka-openshift | copie sous amqp-openshift | maj du fichier deploy-openshift.sh pour déployer une application nommée amqp-trading (on remplace les itérations quarkus-kafka par amqp-trading)
+
+- (optionnel) fermeture d'IJ pour économiser les ressources de la VM.
+
+----déploiement dans le cloud local OpenShift---- 
+
+- démarrage de CRC :
+crc start
+- référence d'oc dans le path :
+eval $(crc oc-env)
+- connexion dans oc en tant que developer :
+oc login -u developer -p developer https://api.crc.testing:6443
+
+- création du projet OpenShift amqp-demo :
+oc new-project amqp-demo
+
+-déploiment d'une application ActiveMQ nommée artemis dans CRC qui se base sur l'image docker "vromero" :
+oc new-app --name=artemis vromero/activemq-artemis:2-alpine-latest -e ARTEMIS_USERNAME=quarkus -e ARTEMIS_PASSWORD=quarkus -e RESTORE_CONFIGURATION=true
+(RESTORE_CONFIGURATION=true pour maintenir sous /etc de l'image la configuration d'ActiveMQ car OpenShift monte automatiquement un volume vide sous tous les volumes déclarés donc /etc inclus)
+
+- vérification que le pod hébergeant ActiveMQ est en service :
+oc get pods
+=> ex de sortie :
+NAME                       READY   STATUS    RESTARTS   AGE
+artemis-84f4cfbff5-xqxmp   1/1     Running   0          12m
+
+- vérification que le nom du service ActiveMQ est bien artemis - car c'est le nom d'hôte utiliser pour connecter l'application à ActiveMQ :
+ oc get services -o name
+=> la sortie doit être : service/artemis
+
+
+- dans un terminal où oc est référencé dans le path , 
+- on se place dans le dossier amqp-openshift.
+- depuis le dossier projet (dossier amqp-openshift), on lance le script : 
+sh deploy-openshift.sh
+=>cela va créé une application amqp-trading à pod hébergeant un container docker basé sur une image ubi minimal dans lequel s'execute l'exe natif. 
+
+- verification que le pod de l'application amqp-trading est prêt :
+avec oc get pods 
+
+- depuis la console web ouverte avec le compte developer 
+*(rôle administrator sélectionné), on navigue vers Networking | Routes
+*(rôle developer sélectionné), on navigue dans Topology | amqp-trading | Routes
+- ouverture de l'url http://amqp-trading-amqp-demo.apps-crc.testing/
+(note : le titre du tableau de bord n'a pas été changé : Quarkus Demo - Kafka messaging)
+=> au bout de quelques secondes on voit les cotations varier.
+
+- on nettoie :
+	-- suppression de l'application amqp-trading : oc delete all -l app=amqp-trading
+	-- suppression de l'application Artemis ActiveMQ : oc delete all -l app=artemis
+	-- mvn clean
+
+- on stoppe CRC : crc stop
+

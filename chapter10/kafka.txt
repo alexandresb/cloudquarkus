@@ -1,0 +1,84 @@
+Quarkus 1.9.0.Final GraalVM 20.1.0 Java 11
+
+=>mise en place avec MicroProfile Reactive Messaging d'une messagerie réactive intrégrant Kafka
+
+Architecture de la messagerie réactive :
+[OpGenerator|>outbound connector]--stock-quote-->[kafka-topic stocks-]--stock-quote-->[inbound connector|>QuoteConverter]--in-merory-channel-->[QuoteResource]--SSE-->index.html
+
+-----utilisation du mode développeur--------
+- depuis IJ création d'un projet via le starter Quarkus intégrant les extensions RESTEasy-jsonb et SmallRye Reactive Messaging - Kafka Connector (io.quarkus:quarkus-resteasy-jsonb & quarkus-smallrye-reactive-messaging-kafka)
+- suppression du package créé par défaut.
+
+- installation de Docker Compose 1.27.4 :
+sudo curl -L "https://github.com/docker/compose/releases/download/1.27.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+- application des permissions pour utiliser Docker Compose : sudo chmod a+x /usr/local/bin/docker-compose
+(vérif : docker-compose --version)
+
+- création des package org.cesi.chapter10.source|entity|processor|endpoint
+
+- Sous org.cesi.chapter10.entity, création de l'enum Company, Operation (utilisé côté "source" ingérée par Kafka), Quote (côté consommateur Kafka)
+
+- Sous org.cesi.chapter10.source création d'un bean ApplicationScoped OperationGenerator source d'un flux réactif d'opérations publiées dans un broker Kafka :
+	--création d'une méthode privée generateOperation pour mapper une entité Opération avec un message Json
+	--création de la méthode  public Multi<String> generate() annotée @org.eclipse.microprofile.reactive.messaging.@Outgoing("stock-quote) créant une source de flux de type Multi qui publie /déverse toutes les 2 sec une opération de trading dans le canal stock-quote. <utilise la biblio de streaming SmallRye Mutiny>
+
+- Sous org.cesi.chapter10.processor création du bean ApplicationScoped QuoteConverter 
+	consommant les messages / payloads provenant de Kafka via le canal stocks
+	et publiant des cotations (quote) dans le canal in-memory-channel (-stream dans le livre) :
+		--création d'une méthode @PostConstruct initialisant une hashmap de quotes
+		-- implémentation de la méthode reactive streams processor annotée @Incoming("stocks") / @Outgoing("in-memory-channel") consommant des opérations de trading et publiant les cotations obtenus
+
+- dans application.properties configuration des connecteurs outbound (messages se déversant dans Kafka) et inbound(messages récupérés depuis Kafka) SmallRye kafka pour intégrer Kafka dans le flux.
+
+- Sous org.cesi.chapter10.endpoint, création de la ressource REST QuoteResource recevant le flux de cotations et émettant/publiant des évènements (cotations) selon le protocole SSE :
+	-- définition de l'uri de base la resource racine : bean annotée avec @Path("/quotes")
+	-- injection d'un publisher associé au canal in-memory-channel :  @Inject @Channel("in-memory-channel") io.reactivestreams.Publisher<String> quoteStream;
+	-- implémentation d'une méthode @GET associé à l'URI "/stream" (@Path("/stream")) publiant aux clients abonnées un flux de cotations issues du canal in-memory-channel :
+		--- produit comme type de contenu un flux d'evnmts SSE : @Produces(MediaType.SERVER_SENT_EVENTS)
+		--- ...au format texte : @org.jboss.resteasy.annotations.SseElementType("text/plain")
+
+- Sous src/main/resources, création via IJ du dossier META-INF/resources & collage du fichier index.html issue du code source du livre
+
+- Sous le dossier projet Kafka (racine du projet), on colle le fichier docker-compose.yml issue du code source du livre. contient la configuration pour lancer les un containers Docker contenant respectivement le service Zookeeper et un broker Kafka utilisant Zookeeper pour fonctionné
+- lancement des containers Zookeeper et Kafka :
+depuis le dossier racine kafka : docker-compose up
+	=> les images sont téléchargés (1er lancement)
+	=> il y a des warnings mais ça fonctionne
+- dans un autre terminal (IJ par ex), on vérifie que les 2 containers sont lancés : docker ps --format '{{.Names}}'
+=>sortie : 
+kafka_kafka_1
+kafka_zookeeper_1
+
+
+- lancement de l'application depuis un terminal : mvn quarkus:dev
+- ouverture de http://localhost:8080 => les cotations commerciale varient au fur et à mesures que des opérations d'achat / vente transitent dans le flux
+<NOTE : si on rafraichit la page index.html, l'appli est redéployé et par conséquent un nouveau flux est démarré/assemblé>
+
+- arrêt : on stoppe l'appli PUIS les services containerisés : Ctrl+C ou docker stop $(docker ps -a -q).
+- (optionnel) suppression des containers kafka et zookeeper : docker rm $(docker ps -a -q)
+
+---utilisation d'une image native (pas dans le livre pour le projet kafka local)
+<Note : dans le livre, il y a création d'une image native dans la partie déploiement dans openshift>
+
+- annotations des entités Quote, Operation et de l'enum avec @io.quarkus.runtime.annotations.RegisterForReflection pour que la reflexion nécessaire au mapping JSON-B fonctionne dans le cas d'une image native
+<Note : @RegisterForReflection est expliquée dans le livre dans la partie déploiement dans OpenShift>
+
+- installation de l'outil native image :
+	-- se placer dans graalvm-ce-java11-20.1.0/bin (le dossier bin de la vers. GraalVM utilisée)
+	-- lancer : gu install native-image
+
+- depuis le dossier racine kafka, création de l'exe natif : mvn package -Pnative
+
+- Lancement de l'exe natif :./target/kafka-1.0-SNAPSHOT-runner
+<pèse environ 50 Mo)
+
+- On stoppe le système comme précédemment et on nettoie  : mvn clean et suppression des containers : docker rm $(docker ps -a -q)
+
+Note :  j'ai aussi testé avec l'application packagée en jar (ce n'est pas le mode dev) : mvn package puis java -jar target/kafka-1.0-SNAPSHOT-runner.jar
+
+
+
+
+
+
+
