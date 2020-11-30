@@ -6,7 +6,7 @@ On s'appuie ici sur le protocole AMQP 1.0
 
 
 Architecture de la messagerie réactive  - onc change le nom des canaux pour mieux matcher avec les étapes du pipeline de trading :
-[OpGenerator--out-operation-->|outbound connector|]---->[kafka-topic stocks-]---->[|inbound connector|--in-operation-->QuoteConverter]--in-memory-stock-quote-->[QuoteResource]--SSE-->index.html
+[OpGenerator--out-operation-->|outbound connector|]---->[queue stocks]---->[|inbound connector|--in-operation-->QuoteConverter]--in-memory-stock-quote-->[QuoteResource]--SSE-->index.html
 
 ----application trading----
 - copie du prj Maven Kafka sous le nom amqp
