@@ -3,7 +3,7 @@ Quarkus 1.9.0.Final GraalVM 20.1.0 Java 11
 =>mise en place avec MicroProfile Reactive Messaging d'une messagerie réactive intrégrant Kafka
 
 Architecture de la messagerie réactive :
-[OpGenerator--stock-quote-->|outbound connector|]---->[kafka-topic stocks-]---->[|inbound connecto|--stocks-->QuoteConverter]--in-merory-channel-->[QuoteResource]--SSE-->index.html
+[OpGenerator--stock-quote-->|outbound connector|]---->[topic Kafka stocks]---->[|inbound connecto|--stocks-->QuoteConverter]--in-merory-channel-->[QuoteResource]--SSE-->index.html
 
 -----utilisation du mode développeur--------
 - depuis IJ création d'un projet via le starter Quarkus intégrant les extensions RESTEasy-jsonb et SmallRye Reactive Messaging - Kafka Connector (io.quarkus:quarkus-resteasy-jsonb & quarkus-smallrye-reactive-messaging-kafka)
